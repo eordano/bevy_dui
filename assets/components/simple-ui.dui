@@ -91,7 +91,7 @@
             left: 210px;
             bottom: 10px;
             border: 20px;
-            background-color: #6666ff;
+            border-color: #6666ff;
         ">
             <div id="mid-navy-blue-content" style="
                 width: 100%;

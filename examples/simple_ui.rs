@@ -2,6 +2,7 @@ use bevy::{
     asset::{DependencyLoadState, LoadState, RecursiveDependencyLoadState},
     ecs::schedule::SystemConfigs,
     prelude::*,
+    state::state::FreelyMutableState,
     utils::HashSet,
 };
 use bevy_dui::{DuiEntityCommandsExt, DuiPlugin, DuiProps, DuiRegistry};
@@ -16,12 +17,12 @@ pub enum State {
 
 // load state tracker, not really important to the example.
 #[derive(Resource, Default)]
-pub struct StateTracker<S: States> {
+pub struct StateTracker<S: States + FreelyMutableState> {
     assets: HashSet<UntypedHandle>,
     _p: PhantomData<fn() -> S>,
 }
 
-impl<S: States> StateTracker<S> {
+impl<S: States + FreelyMutableState> StateTracker<S> {
     pub fn load_asset<A: Asset>(&mut self, h: Handle<A>) {
         self.assets.insert(h.untyped());
     }

@@ -4,7 +4,8 @@ use bevy::{
     ecs::{
         component::Tick,
         reflect::ReflectCommandExt,
-        system::{CommandQueue, EntityCommands, SystemParam},
+        system::{EntityCommands, SystemParam},
+        world::CommandQueue,
     },
     prelude::*,
     text::TextLayoutInfo,
@@ -12,7 +13,7 @@ use bevy::{
         widget::{TextFlags, UiImageSize},
         ContentSize, FocusPolicy,
     },
-    utils::HashMap,
+    utils::{ConditionalSendFuture, HashMap},
 };
 use bevy_ecss::{Property, PropertyValues};
 use std::{
@@ -899,16 +900,19 @@ impl DuiLoader {
 
         // overwrite bg color if not explicitly specified
         if components.get(&TypeId::of::<BackgroundColor>()).is_none() {
-            // yick
-            let default_bg = if components.contains_key(&TypeId::of::<UiImage>()) {
-                Color::WHITE
-            } else {
-                Color::NONE
-            };
             components
                 .entry(TypeId::of::<BackgroundColor>())
-                .or_insert_with(|| Box::new(BackgroundColor::from(default_bg)).into_reflect());
+                .or_insert_with(|| Box::new(BackgroundColor::from(Color::NONE)).into_reflect());
         }
+        if components.get(&TypeId::of::<BorderColor>()).is_none() {
+            components
+                .entry(TypeId::of::<BorderColor>())
+                .or_insert_with(|| Box::new(BorderColor::from(Color::NONE)).into_reflect());
+        }
+        // add border radius, required for border to render ... TODO: support this properly
+        components
+            .entry(TypeId::of::<BorderRadius>())
+            .or_insert_with(|| Box::new(BorderRadius::default()).into_reflect());
         // make sure images get the other required ImageBundle components
         if components.contains_key(&TypeId::of::<UiImage>()) {
             ensure!(components, ContentSize);
@@ -1109,7 +1113,7 @@ impl AssetLoader for DuiLoader {
         reader: &'a mut bevy::asset::io::Reader,
         _: &'a Self::Settings,
         context: &'a mut bevy::asset::LoadContext,
-    ) -> bevy::utils::BoxedFuture<'a, Result<Self::Asset, Self::Error>> {
+    ) -> impl ConditionalSendFuture<Output = Result<Self::Asset, Self::Error>> {
         Box::pin(async move {
             let res = async {
                 let mut buf = Vec::default();
@@ -1141,7 +1145,7 @@ pub struct DuiPlugin;
 
 impl Plugin for DuiPlugin {
     fn build(&self, app: &mut App) {
-        let asset_server = app.world.resource::<AssetServer>().clone();
+        let asset_server = app.world().resource::<AssetServer>().clone();
         app.init_asset::<DuiNodeList>()
             .register_asset_loader(DuiLoader { asset_server })
             .init_resource::<DuiRegistry>()

@@ -6,6 +6,6 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.79"
-bevy = "0.13"
+bevy = "0.14"
 quick-xml = "0.31"
-bevy_ecss = { git = "https://github.com/robtfm/bevy_ecss", branch = "main-13" }
+bevy_ecss = { git = "https://github.com/robtfm/bevy_ecss", branch = "v0.14" }

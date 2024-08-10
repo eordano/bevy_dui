@@ -2,6 +2,7 @@ use bevy::{
     asset::{DependencyLoadState, LoadState, RecursiveDependencyLoadState},
     ecs::{schedule::SystemConfigs, system::EntityCommands},
     prelude::*,
+    state::state::FreelyMutableState,
     utils::HashSet,
 };
 use bevy_dui::{
@@ -20,12 +21,12 @@ pub enum State {
 
 // load state tracker, not really important to the example.
 #[derive(Resource, Default)]
-pub struct StateTracker<S: States> {
+pub struct StateTracker<S: States + FreelyMutableState> {
     assets: HashSet<UntypedHandle>,
     _p: PhantomData<fn() -> S>,
 }
 
-impl<S: States> StateTracker<S> {
+impl<S: States + FreelyMutableState> StateTracker<S> {
     pub fn load_asset<A: Asset>(&mut self, h: Handle<A>) {
         self.assets.insert(h.untyped());
     }
@@ -79,7 +80,7 @@ pub trait ColorHexEx {
 
 impl ColorHexEx for Color {
     fn to_hex_color(&self) -> String {
-        let color = self.as_rgba_u8();
+        let color = self.to_linear().to_u8_array();
         format!(
             "#{:02x}{:02x}{:02x}{:02x}",
             color[0], color[1], color[2], color[3]
@@ -92,7 +93,7 @@ fn register_components(mut registry: ResMut<DuiRegistry>) {
     registry.register_template("toggle-vis", DuiMarkerComponent::<ToggleVis>::default());
     registry.set_default_prop(
         "bird-background",
-        Color::rgba(1.0, 0.0, 0.0, 0.2).to_hex_color(),
+        Color::srgba(1.0, 0.0, 0.0, 0.2).to_hex_color(),
     );
 }
 
