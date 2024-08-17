@@ -15,7 +15,7 @@ use bevy::{
     },
     utils::{ConditionalSendFuture, HashMap},
 };
-use bevy_ecss::{Property, PropertyValues};
+use bevy_ecss::{property::impls::FontColorProperty, Property, PropertyValues, Selector};
 use std::{
     any::{type_name, Any, TypeId},
     collections::BTreeMap,
@@ -281,6 +281,13 @@ impl DuiNode {
                             }
                         } else {
                             warn!("prop image not found (`{key}`)");
+                        }
+                    }
+                    if let Some(key) = prop_components.get(&PropComponent::ImageColor) {
+                        if let Ok(Some(color)) = props.borrow::<Color>(key, ctx) {
+                            ui_component.color = *color;
+                        } else {
+                            warn!("image-color property not a color");
                         }
                     }
                     debug!("added ui_image component");
@@ -583,6 +590,7 @@ pub enum PropValue {
 pub enum PropComponent {
     Text,
     Image,
+    ImageColor,
     StyleAttr(String),
 }
 
@@ -847,17 +855,46 @@ impl DuiLoader {
                             PropComponent::Image,
                             String::from_utf8_lossy(&attr.value[1..]).into_owned(),
                         );
-                        components.insert(
-                            TypeId::of::<UiImage>(),
-                            Box::new(UiImage::new(Handle::default())).into_reflect(),
-                        );
+                        components
+                            .entry(TypeId::of::<UiImage>())
+                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect());
                     } else {
                         let image =
                             asset_server.load(String::from_utf8_lossy(&attr.value).into_owned());
-                        components.insert(
-                            TypeId::of::<UiImage>(),
-                            Box::new(UiImage::new(image)).into_reflect(),
+                        components
+                            .entry(TypeId::of::<UiImage>())
+                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect())
+                            .downcast_mut::<UiImage>()
+                            .unwrap()
+                            .texture = image;
+                    }
+                }
+                b"image-color" => {
+                    if attr.value.as_ref().starts_with(b"@") {
+                        prop_components.insert(
+                            PropComponent::ImageColor,
+                            String::from_utf8_lossy(&attr.value[1..]).into_owned(),
                         );
+                        components
+                            .entry(TypeId::of::<UiImage>())
+                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect());
+                    } else {
+                        let content =
+                            format!("#inline {{color='{}'}}", std::str::from_utf8(&attr.value)?);
+                        let ss = bevy_ecss::StyleSheetAsset::parse("", &content);
+                        if let Some(color) = ss
+                            .get_properties(&Selector::new(Default::default()), "color")
+                            .and_then(|c| FontColorProperty::parse(c).ok())
+                        {
+                            components
+                                .entry(TypeId::of::<UiImage>())
+                                .or_insert_with(|| Box::new(UiImage::default()).into_reflect())
+                                .downcast_mut::<UiImage>()
+                                .unwrap()
+                                .color = color;
+                        } else {
+                            warn!("failed to parse image-color `{:?}`", attr.value);
+                        }
                     }
                 }
                 b"focus" => {
@@ -898,8 +935,8 @@ impl DuiLoader {
             }
         }
 
-        // overwrite bg color if not explicitly specified
-        if components.get(&TypeId::of::<BackgroundColor>()).is_none() {
+        if !components.contains_key(&TypeId::of::<BackgroundColor>()) {
+            // add bg color if not explicitly specified
             components
                 .entry(TypeId::of::<BackgroundColor>())
                 .or_insert_with(|| Box::new(BackgroundColor::from(Color::NONE)).into_reflect());
