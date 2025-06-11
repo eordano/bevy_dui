@@ -1,19 +1,18 @@
 use anyhow::{anyhow, bail, ensure};
 use bevy::{
-    asset::{AssetLoader, AsyncReadExt},
+    asset::AssetLoader,
     ecs::{
+        change_detection::MaybeLocation,
         component::Tick,
         reflect::ReflectCommandExt,
         system::{EntityCommands, SystemParam},
         world::CommandQueue,
     },
+    log::{debug, error, warn},
+    platform::collections::HashMap,
     prelude::*,
-    text::TextLayoutInfo,
-    ui::{
-        widget::{TextFlags, UiImageSize},
-        ContentSize, FocusPolicy,
-    },
-    utils::{ConditionalSendFuture, HashMap},
+    tasks::ConditionalSendFuture,
+    ui::FocusPolicy,
 };
 use bevy_ecss::{property::impls::FontColorProperty, Property, PropertyValues, Selector};
 use std::{
@@ -210,7 +209,7 @@ impl DuiNode {
         };
 
         // apply any @prop style components
-        let mut style_props = HashMap::default();
+        let mut style_props = HashMap::new();
         for (k, v) in prop_components.iter().filter_map(|(k, v)| match k {
             PropComponent::StyleAttr(s) => Some((s, v)),
             _ => None,
@@ -257,7 +256,7 @@ impl DuiNode {
                     let mut text_component = Text::default();
                     text_component.apply(component.as_ref());
                     if let Some(key) = prop_components.get(&PropComponent::Text) {
-                        text_component.sections[0].value = props
+                        text_component.0 = props
                             .borrow::<String>(key, ctx)?
                             .cloned()
                             .unwrap_or_default();
@@ -265,17 +264,17 @@ impl DuiNode {
                     debug!("added text_component '{:?}'", text_component);
                     commands.insert(text_component);
                 }
-                ty if ty == &TypeId::of::<UiImage>() => {
-                    let mut ui_component = UiImage::default();
+                ty if ty == &TypeId::of::<ImageNode>() => {
+                    let mut ui_component = ImageNode::default();
                     ui_component.apply(component.as_ref());
                     if let Some(key) = prop_components.get(&PropComponent::Image) {
                         if let Some(untyped) = props.borrow_untyped(key, ctx) {
                             if let Some(path) = untyped.downcast_ref::<String>() {
-                                ui_component.texture = ctx.asset_server().load(path);
+                                ui_component.image = ctx.asset_server().load(path);
                             } else if let Some(path) = untyped.downcast_ref::<&str>() {
-                                ui_component.texture = ctx.asset_server().load(path.to_owned());
+                                ui_component.image = ctx.asset_server().load(path.to_owned());
                             } else if let Some(handle) = untyped.downcast_ref::<Handle<Image>>() {
-                                ui_component.texture = handle.clone();
+                                ui_component.image = handle.clone();
                             } else {
                                 warn!("prop image type not recognised, expected String, &str or Handle<Image> (`{key}`)");
                             }
@@ -297,11 +296,11 @@ impl DuiNode {
                     debug!(
                         "[{:?}] added reflect component of type {}",
                         commands.id(),
-                        Reflect::get_represented_type_info(component.as_ref())
+                        PartialReflect::get_represented_type_info(component.as_ref())
                             .unwrap()
                             .type_path()
                     );
-                    commands.insert_reflect(component.clone_value());
+                    commands.insert_reflect(component.reflect_clone().unwrap());
                 }
             }
         }
@@ -445,7 +444,7 @@ impl<'a> DuiContext<'a> {
                     debug!("[{:?}] spawned child [{:?}]", root_id, node.id());
                     let res = DuiNode::render_inner(&mut node, iter, props, self)?;
                     let id = node.id();
-                    target.push_children(&[id]);
+                    target.add_children(&[id]);
                     props = res.1;
                     named_nodes.extend(res.0);
                 }
@@ -484,7 +483,7 @@ impl<'a> DuiContext<'a> {
     pub fn spawn_template(
         &mut self,
         template: &str,
-        parent: &mut ChildBuilder,
+        parent: &mut ChildSpawnerCommands,
         props: DuiProps,
     ) -> Result<NodeMap, anyhow::Error> {
         let component = self
@@ -617,7 +616,9 @@ impl Clone for DuiElt {
             template: self.template.clone(),
             properties: self.properties.clone(),
             components: BTreeMap::from_iter(
-                self.components.iter().map(|(k, v)| (*k, v.clone_value())),
+                self.components
+                    .iter()
+                    .map(|(k, v)| (*k, v.reflect_clone().unwrap())),
             ),
             prop_components: self.prop_components.clone(),
             children: self.children.clone(),
@@ -644,7 +645,8 @@ macro_rules! apply_prop {
             };
             let mut ta = Tick::new(0);
             let mut tb = Tick::new(0);
-            let mut_wrapper = Mut::new(target, &mut ta, &mut tb, Tick::new(0), Tick::new(0));
+            let mut caller = MaybeLocation::caller();
+            let mut_wrapper = Mut::new(target, &mut ta, &mut tb, Tick::new(0), Tick::new(0), caller.as_mut());
             if matches!($value.first(), Some(bevy_ecss::PropertyToken::String(s)) if s.starts_with('@')) {
                 let bevy_ecss::PropertyToken::String(s)= $value.first().unwrap() else { panic!() };
                 $prop_components.as_mut().unwrap().insert(PropComponent::StyleAttr($key.to_owned()), s[1..].to_owned());
@@ -708,7 +710,6 @@ impl DuiLoader {
 
         apply_prop!(k, v, w, a, c, p, DisplayProperty)
             || apply_prop!(k, v, w, a, c, p, PositionTypeProperty)
-            || apply_prop!(k, v, w, a, c, p, DirectionProperty)
             || apply_prop!(k, v, w, a, c, p, FlexDirectionProperty)
             || apply_prop!(k, v, w, a, c, p, FlexWrapProperty)
             || apply_prop!(k, v, w, a, c, p, AlignItemsProperty)
@@ -775,8 +776,8 @@ impl DuiLoader {
             };
         }
 
+        ensure!(components, ComputedNode);
         ensure!(components, Node);
-        ensure!(components, Style);
         ensure!(components, FocusPolicy);
         ensure!(components, Transform);
         ensure!(components, GlobalTransform);
@@ -802,11 +803,8 @@ impl DuiLoader {
 
             components.insert(
                 TypeId::of::<Text>(),
-                Box::new(Text::from_section(text_body, Default::default())).into_reflect(),
+                Box::new(Text::new(text_body)).into_reflect(),
             );
-            ensure!(components, TextFlags);
-            ensure!(components, TextLayoutInfo);
-            ensure!(components, ContentSize);
         }
 
         for attr in e.attributes() {
@@ -856,17 +854,17 @@ impl DuiLoader {
                             String::from_utf8_lossy(&attr.value[1..]).into_owned(),
                         );
                         components
-                            .entry(TypeId::of::<UiImage>())
-                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect());
+                            .entry(TypeId::of::<ImageNode>())
+                            .or_insert_with(|| Box::new(ImageNode::default()).into_reflect());
                     } else {
                         let image =
                             asset_server.load(String::from_utf8_lossy(&attr.value).into_owned());
                         components
-                            .entry(TypeId::of::<UiImage>())
-                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect())
-                            .downcast_mut::<UiImage>()
+                            .entry(TypeId::of::<ImageNode>())
+                            .or_insert_with(|| Box::new(ImageNode::default()).into_reflect())
+                            .downcast_mut::<ImageNode>()
                             .unwrap()
-                            .texture = image;
+                            .image = image;
                     }
                 }
                 b"image-color" => {
@@ -876,8 +874,8 @@ impl DuiLoader {
                             String::from_utf8_lossy(&attr.value[1..]).into_owned(),
                         );
                         components
-                            .entry(TypeId::of::<UiImage>())
-                            .or_insert_with(|| Box::new(UiImage::default()).into_reflect());
+                            .entry(TypeId::of::<ImageNode>())
+                            .or_insert_with(|| Box::new(ImageNode::default()).into_reflect());
                     } else {
                         let content =
                             format!("#inline {{color='{}'}}", std::str::from_utf8(&attr.value)?);
@@ -887,9 +885,9 @@ impl DuiLoader {
                             .and_then(|c| FontColorProperty::parse(c).ok())
                         {
                             components
-                                .entry(TypeId::of::<UiImage>())
-                                .or_insert_with(|| Box::new(UiImage::default()).into_reflect())
-                                .downcast_mut::<UiImage>()
+                                .entry(TypeId::of::<ImageNode>())
+                                .or_insert_with(|| Box::new(ImageNode::default()).into_reflect())
+                                .downcast_mut::<ImageNode>()
                                 .unwrap()
                                 .color = color;
                         } else {
@@ -920,7 +918,7 @@ impl DuiLoader {
                     let index = String::from_utf8_lossy(attr.value.as_ref()).parse::<i32>()?;
                     components.insert(
                         TypeId::of::<ZIndex>(),
-                        Box::new(ZIndex::Local(index)).into_reflect(),
+                        Box::new(ZIndex(index)).into_reflect(),
                     );
                 }
                 _ => {
@@ -950,11 +948,6 @@ impl DuiLoader {
         components
             .entry(TypeId::of::<BorderRadius>())
             .or_insert_with(|| Box::new(BorderRadius::default()).into_reflect());
-        // make sure images get the other required ImageBundle components
-        if components.contains_key(&TypeId::of::<UiImage>()) {
-            ensure!(components, ContentSize);
-            ensure!(components, UiImageSize);
-        }
 
         Ok(())
     }
@@ -1030,7 +1023,7 @@ impl DuiLoader {
                                 e.attributes().flat_map(|a| a.ok()).map(|attr| {
                                     let target_prop =
                                         String::from_utf8_lossy(attr.key.as_ref()).into_owned();
-                                    let value = if attr.value.starts_with(&[b'@']) {
+                                    let value = if attr.value.starts_with(b"@") {
                                         PropValue::Prop(
                                             String::from_utf8_lossy(&attr.value[1..]).into_owned(),
                                         )
@@ -1088,23 +1081,7 @@ impl DuiLoader {
                     };
                     components.insert(
                         TypeId::of::<Text>(),
-                        Box::new(Text::from_section(
-                            e.unescape()?.into_owned(),
-                            Default::default(),
-                        ))
-                        .into_reflect(),
-                    );
-                    components.insert(
-                        TypeId::of::<TextLayoutInfo>(),
-                        Box::<TextLayoutInfo>::default().into_reflect(),
-                    );
-                    components.insert(
-                        TypeId::of::<TextFlags>(),
-                        Box::<TextFlags>::default().into_reflect(),
-                    );
-                    components.insert(
-                        TypeId::of::<ContentSize>(),
-                        Box::<ContentSize>::default().into_reflect(),
+                        Box::new(Text::new(e.unescape()?)).into_reflect(),
                     );
                 }
 
@@ -1145,11 +1122,11 @@ impl AssetLoader for DuiLoader {
 
     type Error = anyhow::Error;
 
-    fn load<'a>(
-        &'a self,
-        reader: &'a mut bevy::asset::io::Reader,
-        _: &'a Self::Settings,
-        context: &'a mut bevy::asset::LoadContext,
+    fn load(
+        &self,
+        reader: &mut dyn bevy::asset::io::Reader,
+        _: &Self::Settings,
+        context: &mut bevy::asset::LoadContext,
     ) -> impl ConditionalSendFuture<Output = Result<Self::Asset, Self::Error>> {
         Box::pin(async move {
             let res = async {
@@ -1226,19 +1203,19 @@ impl<'w, 's> DuiCommandsExt for Commands<'w, 's> {
         template: &str,
         props: DuiProps,
     ) -> Result<DuiEntities, anyhow::Error> {
-        self.spawn(NodeBundle::default())
+        self.spawn(Node::default())
             .apply_template(dui, template, props)
     }
 }
 
-impl<'a> DuiCommandsExt for ChildBuilder<'a> {
+impl<'a> DuiCommandsExt for ChildSpawnerCommands<'a> {
     fn spawn_template(
         &mut self,
         dui: &DuiRegistry,
         template: &str,
         props: DuiProps,
     ) -> Result<DuiEntities, anyhow::Error> {
-        let mut root = self.spawn(NodeBundle::default());
+        let mut root = self.spawn(Node::default());
         dui.apply_template(&mut root, template, props)
     }
 }
@@ -1260,7 +1237,7 @@ impl<'a> DuiCommandsExt for EntityCommands<'a> {
         props: DuiProps,
     ) -> Result<DuiEntities, anyhow::Error> {
         let results = self.commands().spawn_template(dui, template, props)?;
-        self.push_children(&[results.root]);
+        self.add_children(&[results.root]);
         Ok(results)
     }
 }

@@ -1,9 +1,12 @@
 use bevy::{
     asset::{DependencyLoadState, LoadState, RecursiveDependencyLoadState},
-    ecs::{schedule::SystemConfigs, system::EntityCommands},
+    ecs::{
+        schedule::ScheduleConfigs,
+        system::{EntityCommands, ScheduleSystem},
+    },
+    platform::collections::HashSet,
     prelude::*,
     state::state::FreelyMutableState,
-    utils::HashSet,
 };
 use bevy_dui::{
     DuiContext, DuiEntityCommandsExt, DuiMarkerComponent, DuiPlugin, DuiProps, DuiRegistry,
@@ -31,17 +34,21 @@ impl<S: States + FreelyMutableState> StateTracker<S> {
         self.assets.insert(h.untyped());
     }
 
-    pub fn transition_when_finished(next: S) -> SystemConfigs {
+    pub fn transition_when_finished(next: S) -> ScheduleConfigs<ScheduleSystem> {
         let system = move |slf: Res<StateTracker<S>>,
                            asset_server: Res<AssetServer>,
                            mut next_state: ResMut<NextState<S>>| {
             if slf.assets.iter().all(|a| {
-                asset_server.get_load_states(a.id())
-                    == Some((
-                        LoadState::Loaded,
-                        DependencyLoadState::Loaded,
-                        RecursiveDependencyLoadState::Loaded,
-                    ))
+                if let Some((
+                    LoadState::Loaded,
+                    DependencyLoadState::Loaded,
+                    RecursiveDependencyLoadState::Loaded,
+                )) = asset_server.get_load_states(a.id())
+                {
+                    true
+                } else {
+                    false
+                }
             }) {
                 next_state.set(next.clone())
             }
@@ -101,7 +108,7 @@ fn register_components(mut registry: ResMut<DuiRegistry>) {
 pub struct ToggleVis;
 
 fn show_ui(mut commands: Commands, asset_server: Res<AssetServer>, dui: Res<DuiRegistry>) {
-    commands.spawn(Camera3dBundle::default());
+    commands.spawn(Camera3d::default());
 
     // we can use a custom component and pass properties to it. note that the type must match *exactly* (String is different to &str, etc).
     let list_items = (0..30).map(|i| format!("Item {i}")).collect::<Vec<_>>();
@@ -133,7 +140,7 @@ fn show_ui(mut commands: Commands, asset_server: Res<AssetServer>, dui: Res<DuiR
 
 fn toggle_vis(mut q: Query<&mut Visibility, With<ToggleVis>>, time: Res<Time>) {
     for mut v in q.iter_mut() {
-        *v = if (time.elapsed_seconds() as u32) & 1 == 1 {
+        *v = if (time.elapsed_secs() as u32) & 1 == 1 {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -156,27 +163,23 @@ impl DuiTemplate for MyListComponent {
         let mut results = ctx.apply_children(commands)?;
 
         commands
-            .insert(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::ColumnReverse,
-                    flex_grow: 1.0,
-                    ..Default::default()
-                },
+            .insert(Node {
+                flex_direction: FlexDirection::ColumnReverse,
+                flex_grow: 1.0,
                 ..Default::default()
             })
             .with_children(|c| {
                 for (i, item) in items.into_iter().enumerate() {
                     let id = c
-                        .spawn(
-                            TextBundle::from_section(
-                                format!("{item}"),
-                                TextStyle {
-                                    font: ctx.asset_server().load("fonts/FiraSans-Bold.ttf"),
-                                    font_size: 20.,
-                                    color: Color::WHITE,
-                                },
-                            )
-                            .with_style(Style {
+                        .spawn((
+                            Text::new(format!("{item}")),
+                            TextFont {
+                                font: ctx.asset_server().load("fonts/FiraSans-Bold.ttf"),
+                                font_size: 20.,
+                                ..Default::default()
+                            },
+                            TextColor(Color::WHITE),
+                            Node {
                                 flex_shrink: 0.,
                                 height: Val::Px(20.),
                                 margin: UiRect {
@@ -185,8 +188,8 @@ impl DuiTemplate for MyListComponent {
                                     ..default()
                                 },
                                 ..default()
-                            }),
-                        )
+                            },
+                        ))
                         .insert(bevy_ecss::Class::new("big-text"))
                         .insert(Name::new(format!("item-{}", i)))
                         .id();

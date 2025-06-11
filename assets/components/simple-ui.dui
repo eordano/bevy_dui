@@ -20,7 +20,7 @@
             ">
                 <div id="left-text" style="
                     font: 'fonts/FiraSans-Bold.ttf';
-                    font-size: 300px;
+                    font-size: 30px;
                     color: white;
                 ">
                     Text Example

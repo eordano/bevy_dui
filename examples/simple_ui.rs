@@ -1,9 +1,9 @@
 use bevy::{
     asset::{DependencyLoadState, LoadState, RecursiveDependencyLoadState},
-    ecs::schedule::SystemConfigs,
+    ecs::{schedule::ScheduleConfigs, system::ScheduleSystem},
+    platform::collections::HashSet,
     prelude::*,
     state::state::FreelyMutableState,
-    utils::HashSet,
 };
 use bevy_dui::{DuiEntityCommandsExt, DuiPlugin, DuiProps, DuiRegistry};
 use std::marker::PhantomData;
@@ -27,17 +27,21 @@ impl<S: States + FreelyMutableState> StateTracker<S> {
         self.assets.insert(h.untyped());
     }
 
-    pub fn transition_when_finished(next: S) -> SystemConfigs {
+    pub fn transition_when_finished(next: S) -> ScheduleConfigs<ScheduleSystem> {
         let system = move |slf: Res<StateTracker<S>>,
                            asset_server: Res<AssetServer>,
                            mut next_state: ResMut<NextState<S>>| {
             if slf.assets.iter().all(|a| {
-                asset_server.get_load_states(a.id())
-                    == Some((
-                        LoadState::Loaded,
-                        DependencyLoadState::Loaded,
-                        RecursiveDependencyLoadState::Loaded,
-                    ))
+                if let Some((
+                    LoadState::Loaded,
+                    DependencyLoadState::Loaded,
+                    RecursiveDependencyLoadState::Loaded,
+                )) = asset_server.get_load_states(a.id())
+                {
+                    true
+                } else {
+                    false
+                }
             }) {
                 next_state.set(next.clone())
             }
@@ -69,7 +73,7 @@ fn load_assets(asset_server: Res<AssetServer>, mut tracker: ResMut<StateTracker<
 }
 
 fn show_ui(mut commands: Commands, asset_server: Res<AssetServer>, dui: Res<DuiRegistry>) {
-    commands.spawn(Camera3dBundle::default());
+    commands.spawn(Camera3d::default());
 
     commands
         .spawn(bevy_ecss::StyleSheet::new(
