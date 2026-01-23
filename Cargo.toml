@@ -6,12 +6,12 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.79"
-bevy = { git = "https://github.com/robtfm/bevy", branch = "async-pipeline-compile", default-features = false }
+bevy = { git = "https://github.com/robtfm/bevy", branch = "async-pipeline-handler", default-features = false }
 quick-xml = "0.31"
 bevy_ecss = { git = "https://github.com/robtfm/bevy_ecss", branch = "0.16" }
 
 [dev-dependencies]
-bevy = { git = "https://github.com/robtfm/bevy", branch = "async-pipeline-compile", default-features = true }
+bevy = { git = "https://github.com/robtfm/bevy", branch = "async-pipeline-handler", default-features = true }
 
 # [patch."https://github.com/robtfm/bevy"]
 # bevy = { path = "../bevy" }
