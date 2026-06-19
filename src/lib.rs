@@ -1163,6 +1163,11 @@ impl Plugin for DuiPlugin {
         app.init_asset::<DuiNodeList>()
             .register_asset_loader(DuiLoader { asset_server })
             .init_resource::<DuiRegistry>()
+            // these are inserted reflectively (see `ensure!` below), so they must
+            // be in the type registry; bevy 0.17 no longer auto-registers them here.
+            .register_type::<InheritedVisibility>()
+            .register_type::<ViewVisibility>()
+            .register_type::<Visibility>()
             .add_systems(PreUpdate, add_duis);
     }
 }
