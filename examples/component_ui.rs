@@ -174,8 +174,12 @@ impl DuiTemplate for MyListComponent {
                         .spawn((
                             Text::new(format!("{item}")),
                             TextFont {
-                                font: ctx.asset_server().load("fonts/FiraSans-Bold.ttf"),
-                                font_size: 20.,
+                                // bevy 0.19: TextFont::font is now a FontSource and
+                                // font_size is a FontSize (Cosmic Text -> Parley migration).
+                                font: FontSource::Handle(
+                                    ctx.asset_server().load("fonts/FiraSans-Bold.ttf"),
+                                ),
+                                font_size: FontSize::Px(20.),
                                 ..Default::default()
                             },
                             TextColor(Color::WHITE),
