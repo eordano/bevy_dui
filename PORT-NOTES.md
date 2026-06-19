@@ -1,9 +1,9 @@
-# bevy_dui: Bevy 0.16 -> 0.17 port notes
+# bevy_dui: Bevy 0.17 -> 0.18 port notes
 
-Branch: `0.17` (forked from `0.16`).
-Target: `bevy = "0.17.3"` from crates.io.
+Branch: `0.18` (forked from `0.17`).
+Target: `bevy = "0.18.1"` from crates.io.
 
-Build (clean, zero warnings):
+Build:
 
 ```
 /home/dcl/linux-rigging/dcl-shell -c "cd /home/dcl/bevy_dui-fork && cargo build"
@@ -11,47 +11,58 @@ Build (clean, zero warnings):
 
 ## Dependency changes (Cargo.toml)
 
-- `bevy`: switched from the robtfm `release-0.16-dcl` git fork to `version = "0.17.3"`
-  (crates.io), for both the normal and dev dependency.
-- `bevy_ecss`: switched from `git = robtfm/bevy_ecss, branch = "0.16"` to a local
-  path dependency `{ path = "../bevy_ecss-fork" }`.
-
-  **Why a path dep / FLAG:** there is *no* 0.17-compatible `bevy_ecss` anywhere.
-  Upstream `afonsolage/bevy_ecss` tops out at 0.7.0 (bevy 0.16) on crates.io, and
-  robtfm's fork only has a `0.16` branch. `bevy_dui` hard-depends on `bevy_ecss`
-  internals (`bevy_ecss::property::impls::*`, the `Property` trait, `PropertyValues`,
-  `PropertyToken`, `StyleSheetAsset`, `Selector`, `Class`), so porting `bevy_dui` to
-  0.17 required also porting `bevy_ecss` to 0.17. That port lives in
-  `/home/dcl/bevy_ecss-fork` (branch `0.17`, version bumped to 0.8.0) and has its own
-  PORT-NOTES.md. Before consuming this in bevy-explorer you must decide where the
-  `bevy_ecss` 0.17 port should live (publish a branch / git dep) and repoint this
-  Cargo.toml accordingly.
+- `bevy`: `0.17.3` -> `0.18.1` (crates.io), for both the normal and the dev dependency.
+- `bevy_ecss`: unchanged path dependency `{ path = "../bevy_ecss-fork" }`. The
+  `bevy_ecss-fork` must be on its `0.18` branch (also bumped to `bevy = 0.18.1`).
+  See the dependency note at the bottom.
 
 ## Source changes (src/lib.rs)
 
-Only one API break surfaced in `bevy_dui` itself:
+Only one 0.17 -> 0.18 API break surfaced in `bevy_dui` itself:
 
-- `EventReader<AssetEvent<DuiNodeList>>` -> `MessageReader<AssetEvent<DuiNodeList>>`
-  in `add_duis`. In 0.17 the buffered-event API was renamed (`Event` -> `Message`,
-  `EventReader` -> `MessageReader`, etc.). `AssetEvent` is now a `Message`.
-  `MessageReader` is re-exported from the bevy prelude, so no import change was needed.
+- **`BorderRadius` is no longer a standalone component.** In 0.18 it became a field
+  on the `Node` component (`Node::border_radius: BorderRadius`), and the
+  `BorderRadius` type is now only `Reflect` (not `Component` / not
+  `reflect(Component)`). `bevy_dui` previously inserted a default `BorderRadius`
+  reflectively in `node_from_attrs` ("required for border to render"). That block was
+  removed: `Node`'s `Default` already carries `BorderRadius::DEFAULT`, so a div's
+  border radius travels with its `Node` and there is nothing extra to insert. Keeping
+  the old block would have failed (inserting a non-`Component` reflect value as a
+  component).
 
 ## Breaks that did NOT surface (and why)
 
-The task anticipated a number of 0.16->0.17 UI breaks (`BorderColor` per-side fields,
-`ScrollPosition` newtype, text type moves, camera moves to `bevy_camera`,
-required-components changes). None of these required edits in `bevy_dui` because the
-crate manipulates almost all UI components reflectively
-(`Box::<T>::default().into_reflect()`, `PartialReflect::apply`, `insert_reflect`,
-`reflect_clone`) rather than via direct field access. The concrete UI field-shape
-changes (e.g. `BorderColor`) are absorbed inside `bevy_ecss`'s property
-implementations, which is where they were handled during the `bevy_ecss` port. The
-only non-reflective component touches in `bevy_dui` are `Text`, `ImageNode`
-(`.image`, `.color`), `ZIndex(i32)`, `FocusPolicy`, `Node`, `BorderRadius`,
-`BackgroundColor`, `BorderColor`, `Name`, `Interaction` — all of which kept
-compatible constructors / `From`/`Default` impls in 0.17.
+The task anticipated several 0.17->0.18 breaks. None required edits in `bevy_dui`:
+
+- **`LineHeight` removed from `TextFont` / now a separate required component** — not
+  referenced anywhere in `bevy_dui`; font/text layout properties are owned by
+  `bevy_ecss`'s property impls, handled in the `bevy_ecss` port.
+- **Entity events immutable / `SetEntityEventTarget`** — `bevy_dui` does not use
+  entity events or observers.
+- **`RenderTarget` moved to a required component on the camera** — `bevy_dui` does not
+  spawn cameras.
+- **`ScrollPosition` / UI tweaks, `BackgroundColor`/`BorderColor`** — `BackgroundColor`
+  is still `BackgroundColor(pub Color)` and `BorderColor::from(impl Into<Color>)` still
+  exists (blanket `From`), so the existing reflective + `From` usage compiles
+  unchanged. `ScrollPosition` is not referenced.
+- **Reflect registration** — the explicit `register_type::<{Inherited,View}Visibility>()`
+  / `register_type::<Visibility>()` calls added during the 0.17 port still apply; no
+  `#[reflect(...)]` macro-syntax changes were needed in this crate.
+
+As in the 0.16->0.17 port, `bevy_dui` manipulates almost all UI components
+reflectively (`Box::<T>::default().into_reflect()`, `PartialReflect::apply`,
+`insert_reflect`, `reflect_clone`), so concrete UI field-shape changes are absorbed
+inside `bevy_ecss` rather than here.
+
+## Dependency: bevy_ecss 0.18
+
+`bevy_dui` hard-depends on `bevy_ecss` internals, so it builds against
+`bevy_ecss-fork` on its `0.18` branch (bevy 0.18.1). That branch was ported in
+parallel (it dropped 0.18-removed items such as `bevy::ecs::component::ComponentTicks`
+and `Tick` moving to `bevy::ecs::change_detection`). This `bevy_dui` 0.18 port was
+verified green against the committed `bevy_ecss-fork@0.18`.
 
 ## Status
 
-Green. `cargo build` succeeds with no errors and no warnings for both `bevy_dui`
-and its `bevy_ecss-fork` path dependency.
+Green. `cargo build` and `cargo build --all-targets` both succeed with zero errors and
+zero warnings against `bevy = 0.18.1` and `bevy_ecss-fork@0.18`.

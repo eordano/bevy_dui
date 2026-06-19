@@ -2,8 +2,7 @@ use anyhow::{anyhow, bail, ensure};
 use bevy::{
     asset::AssetLoader,
     ecs::{
-        change_detection::MaybeLocation,
-        component::Tick,
+        change_detection::{MaybeLocation, Tick},
         reflect::ReflectCommandExt,
         system::{EntityCommands, SystemParam},
         world::CommandQueue,
@@ -944,10 +943,9 @@ impl DuiLoader {
                 .entry(TypeId::of::<BorderColor>())
                 .or_insert_with(|| Box::new(BorderColor::from(Color::NONE)).into_reflect());
         }
-        // add border radius, required for border to render ... TODO: support this properly
-        components
-            .entry(TypeId::of::<BorderRadius>())
-            .or_insert_with(|| Box::new(BorderRadius::default()).into_reflect());
+        // bevy 0.18: BorderRadius is no longer a standalone component; it is a field on
+        // `Node` (whose default already carries `BorderRadius::DEFAULT`), so there is
+        // nothing extra to insert here.
 
         Ok(())
     }
@@ -1111,6 +1109,7 @@ impl DuiLoader {
     }
 }
 
+#[derive(TypePath)]
 pub struct DuiLoader {
     asset_server: AssetServer,
 }
