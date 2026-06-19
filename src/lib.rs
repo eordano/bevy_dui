@@ -1168,7 +1168,7 @@ impl Plugin for DuiPlugin {
 }
 
 fn add_duis(
-    mut evs: EventReader<AssetEvent<DuiNodeList>>,
+    mut evs: MessageReader<AssetEvent<DuiNodeList>>,
     assets: Res<Assets<DuiNodeList>>,
     mut dui: ResMut<DuiRegistry>,
 ) {
