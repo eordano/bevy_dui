@@ -6,7 +6,7 @@ Target: `bevy = "0.19.0"` from crates.io.
 Build:
 
 ```
-/home/dcl/linux-rigging/dcl-shell -c "cd /home/dcl/bevy_dui-fork && cargo build"
+cargo build
 ```
 
 ## Dependency changes (Cargo.toml)
